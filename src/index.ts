@@ -5,50 +5,77 @@ import { z } from "zod";
 // Define our MCP agent with tools
 export class MyMCP extends McpAgent {
 	server = new McpServer({
-		name: "Authless Calculator",
-		version: "1.0.0",
+		name: "algtools-mcp",
+		version: "0.0.0",
 	});
 
-	async init() {
-		// Simple addition tool
-		this.server.tool("add", { a: z.number(), b: z.number() }, async ({ a, b }) => ({
-			content: [{ type: "text", text: String(a + b) }],
-		}));
+	private env?: Env;
 
-		// Calculator tool with multiple operations
+	async init(env: Env) {
+		this.env = env;
+
+		// CursorRules tool that performs AI search on autorag
 		this.server.tool(
-			"calculate",
+			"cursorRules",
 			{
-				operation: z.enum(["add", "subtract", "multiply", "divide"]),
-				a: z.number(),
-				b: z.number(),
+				query: z.string().describe("The search query to find relevant cursor rules"),
 			},
-			async ({ operation, a, b }) => {
-				let result: number;
-				switch (operation) {
-					case "add":
-						result = a + b;
-						break;
-					case "subtract":
-						result = a - b;
-						break;
-					case "multiply":
-						result = a * b;
-						break;
-					case "divide":
-						if (b === 0)
-							return {
-								content: [
-									{
-										type: "text",
-										text: "Error: Cannot divide by zero",
-									},
-								],
-							};
-						result = a / b;
-						break;
+			async ({ query }) => {
+				if (!this.env) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Error: Environment not initialized",
+							},
+						],
+					};
 				}
-				return { content: [{ type: "text", text: String(result) }] };
+
+				try {
+					const response = await fetch(
+						"https://api.cloudflare.com/client/v4/accounts/31eafafb86927bf33ef3cf164fe6aa15/autorag/rags/algtools-cursor-rules-rag/ai-search",
+						{
+							method: "POST",
+							headers: {
+								"Content-Type": "application/json",
+								Authorization: `Bearer ${this.env.AI_SEARCH_API_TOKEN}`,
+							},
+							body: JSON.stringify({ query }),
+						},
+					);
+
+					if (!response.ok) {
+						const errorText = await response.text();
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Error: Failed to search cursor rules. Status: ${response.status}, Message: ${errorText}`,
+								},
+							],
+						};
+					}
+
+					const data = await response.json();
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(data, null, 2),
+							},
+						],
+					};
+				} catch (error) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Error: Failed to search cursor rules. ${error instanceof Error ? error.message : String(error)}`,
+							},
+						],
+					};
+				}
 			},
 		);
 	}
