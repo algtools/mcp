@@ -264,6 +264,261 @@ export class MyMCP extends McpAgent<Env> {
 	}
 }
 
+// Helper function to convert Zod schema to OpenAPI schema
+function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): any {
+	if (zodSchema instanceof z.ZodString) {
+		return { type: "string" };
+	}
+	if (zodSchema instanceof z.ZodNumber) {
+		return { type: "number" };
+	}
+	if (zodSchema instanceof z.ZodBoolean) {
+		return { type: "boolean" };
+	}
+	if (zodSchema instanceof z.ZodOptional) {
+		return zodToOpenAPISchema(zodSchema._def.innerType);
+	}
+	if (zodSchema instanceof z.ZodObject) {
+		const properties: Record<string, any> = {};
+		const required: string[] = [];
+		for (const [key, value] of Object.entries(zodSchema.shape)) {
+			properties[key] = zodToOpenAPISchema(value as z.ZodTypeAny);
+			if (!(value instanceof z.ZodOptional)) {
+				required.push(key);
+			}
+		}
+		return {
+			type: "object",
+			properties,
+			...(required.length > 0 && { required }),
+		};
+	}
+	if (zodSchema instanceof z.ZodArray) {
+		return {
+			type: "array",
+			items: zodToOpenAPISchema(zodSchema._def.type),
+		};
+	}
+	return { type: "string" };
+}
+
+// Generate OpenAPI spec from MCP tools
+async function generateOpenAPISpec(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	// Get tools by making a request to the MCP server
+	const mcpRequest = new Request(new URL("/mcp", request.url), {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/list",
+			params: {},
+		}),
+	});
+
+	const mcpResponse = await MyMCP.serve("/mcp").fetch(mcpRequest, env, {} as ExecutionContext);
+	const mcpData = (await mcpResponse.json()) as {
+		result?: { tools?: Array<{ name: string; description?: string; inputSchema?: any }> };
+		error?: { message: string };
+	};
+	const tools = mcpData.result?.tools || [];
+
+	const baseUrl = new URL(request.url).origin;
+	const openAPISpec = {
+		openapi: "3.1.0",
+		info: {
+			title: "MCP Tools API",
+			version: pjson.version,
+			description: "API documentation for MCP (Model Context Protocol) tools",
+		},
+		servers: [
+			{
+				url: baseUrl,
+				description: "MCP Server",
+			},
+		],
+		paths: {} as Record<string, any>,
+	};
+
+	// Add a generic MCP endpoint
+	openAPISpec.paths["/mcp"] = {
+		post: {
+			summary: "MCP JSON-RPC Endpoint",
+			description: "Execute MCP tools using JSON-RPC protocol",
+			operationId: "mcpRequest",
+			requestBody: {
+				required: true,
+				content: {
+					"application/json": {
+						schema: {
+							type: "object",
+							properties: {
+								jsonrpc: {
+									type: "string",
+									enum: ["2.0"],
+									default: "2.0",
+								},
+								method: {
+									type: "string",
+									enum: ["tools/list", "tools/call", "initialize"],
+									description: "MCP method to call",
+								},
+								params: {
+									type: "object",
+									description: "Method parameters",
+								},
+								id: {
+									type: "number",
+									description: "Request ID",
+								},
+							},
+							required: ["jsonrpc", "method", "id"],
+						},
+					},
+				},
+			},
+			responses: {
+				"200": {
+					description: "Successful response",
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+							},
+						},
+					},
+				},
+			},
+		},
+	};
+
+	// Add individual tool endpoints
+		for (const tool of tools) {
+			const toolName = tool.name;
+			const path = `/tools/${toolName}`;
+			const inputSchema = tool.inputSchema || {};
+			const properties = inputSchema.properties || {};
+			const required = inputSchema.required || [];
+
+			const requestBodySchema: Record<string, any> = {
+				type: "object",
+				properties: {},
+			};
+
+			for (const [paramName, paramSchema] of Object.entries(properties)) {
+				// Handle Zod schema objects
+				let schemaType = "string";
+				let description = (paramSchema as any).description || "";
+
+				// Try to infer type from Zod schema
+				if ((paramSchema as any).type) {
+					schemaType = (paramSchema as any).type;
+				} else if ((paramSchema as any)._def) {
+					// It's a Zod schema, try to convert it
+					try {
+						const zodSchema = paramSchema as z.ZodTypeAny;
+						const openApiSchema = zodToOpenAPISchema(zodSchema);
+						requestBodySchema.properties[paramName] = {
+							...openApiSchema,
+							description,
+						};
+						continue;
+					} catch {
+						// Fallback to string
+					}
+				}
+
+				requestBodySchema.properties[paramName] = {
+					type: schemaType,
+					description,
+				};
+			}
+
+			if (required.length > 0) {
+				requestBodySchema.required = required;
+			}
+
+		openAPISpec.paths[path] = {
+			post: {
+				summary: tool.description || `Execute ${toolName} tool`,
+				description: tool.description || `Call the ${toolName} MCP tool`,
+				operationId: `call_${toolName}`,
+				tags: [toolName],
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: requestBodySchema,
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "Tool execution result",
+						content: {
+							"application/json": {
+								schema: {
+									type: "object",
+									properties: {
+										content: {
+											type: "array",
+											items: {
+												type: "object",
+												properties: {
+													type: { type: "string" },
+													text: { type: "string" },
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		};
+	}
+
+	return new Response(JSON.stringify(openAPISpec, null, 2), {
+		headers: {
+			"Content-Type": "application/json",
+		},
+	});
+}
+
+// Scalar API Reference HTML
+const SCALAR_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>MCP Tools API Reference</title>
+	<style>
+		body {
+			margin: 0;
+			padding: 0;
+		}
+	</style>
+</head>
+<body>
+	<script
+		id="api-reference"
+		data-configuration='{
+			"theme": "purple",
+			"layout": "modern",
+			"spec": {
+				"url": "/openapi.json"
+			}
+		}'
+	></script>
+	<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js"></script>
+</body>
+</html>`;
+
 // HTML content for the testing interface - embedded as string
 const TEST_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -749,8 +1004,22 @@ export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 
-		// Serve the testing interface
-		if (url.pathname === "/" || url.pathname === "/test") {
+		// Serve Scalar API Reference (main interface)
+		if (url.pathname === "/" || url.pathname === "/docs") {
+			return new Response(SCALAR_HTML, {
+				headers: {
+					"Content-Type": "text/html",
+				},
+			});
+		}
+
+		// Serve OpenAPI spec
+		if (url.pathname === "/openapi.json") {
+			return generateOpenAPISpec(request, env);
+		}
+
+		// Serve the simple testing interface (legacy)
+		if (url.pathname === "/test") {
 			return new Response(TEST_HTML, {
 				headers: {
 					"Content-Type": "text/html",
