@@ -25,4 +25,6 @@
 	"observability": {
 		"enabled": true
 	}
+	// Note: AI_SEARCH_API_TOKEN should be set as a secret using:
+	// wrangler secret put AI_SEARCH_API_TOKEN
 }
