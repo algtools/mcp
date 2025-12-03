@@ -3,22 +3,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 // Define our MCP agent with tools
-export class MyMCP extends McpAgent {
+export class MyMCP extends McpAgent<Env> {
 	server = new McpServer({
 		name: "algtools-mcp",
 		version: "0.0.0",
 	});
 
-	private env?: Env;
-
-	async init(env: Env) {
-		this.env = env;
-
+	async init() {
 		// CursorRules tool that performs AI search on autorag
 		this.server.tool(
 			"cursorRules",
 			{
-				query: z.string().describe("The search query to find relevant cursor rules"),
+				query: z
+					.string()
+					.describe("The search query to find relevant cursor rules"),
 			},
 			async ({ query }) => {
 				if (!this.env) {

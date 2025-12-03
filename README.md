@@ -17,6 +17,42 @@ npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/rem
 
 To add your own [tools](https://developers.cloudflare.com/agents/model-context-protocol/tools/) to the MCP server, define each tool inside the `init()` method of `src/index.ts` using `this.server.tool(...)`. 
 
+### Environment Variables and Secrets
+
+This MCP server uses Cloudflare Workers environment variables and secrets. The environment is automatically passed to your Durable Object through the base class.
+
+To access environment variables in your tools:
+```typescript
+async init() {
+    this.server.tool("myTool", {}, async () => {
+        // Access environment variables through this.env
+        const apiToken = this.env.AI_SEARCH_API_TOKEN;
+        // ...
+    });
+}
+```
+
+**Setting up secrets:**
+
+For sensitive values like API tokens, use Wrangler secrets instead of plain environment variables:
+
+```bash
+# Set a secret
+wrangler secret put AI_SEARCH_API_TOKEN
+
+# For local development, create a .dev.vars file:
+echo "AI_SEARCH_API_TOKEN=your-token-here" > .dev.vars
+```
+
+Don't forget to update the `worker-configuration.d.ts` file to include your environment variables in the `Env` interface:
+
+```typescript
+interface Env {
+    MCP_OBJECT: DurableObjectNamespace<import("./src/index").MyMCP>;
+    AI_SEARCH_API_TOKEN: string;
+}
+```
+
 ## Connect to Cloudflare AI Playground
 
 You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:

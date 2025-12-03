@@ -1,0 +1,5 @@
+# Example environment variables for local development
+# Copy this file to .dev.vars and fill in your actual values
+# DO NOT commit .dev.vars to version control
+
+AI_SEARCH_API_TOKEN=your-cloudflare-api-token-here
