@@ -80,6 +80,31 @@ interface Env {
 }
 ```
 
+## Testing MCP Tools Online
+
+This MCP server includes a comprehensive web interface for testing tools using **Scalar API Reference**.
+
+### Access the Testing Interface
+
+After deploying or running locally, visit:
+- **Main Interface (Scalar)**: `http://localhost:8787/` or `http://localhost:8787/docs`
+- **Simple Tester**: `http://localhost:8787/test`
+- **OpenAPI Spec**: `http://localhost:8787/openapi.json`
+
+The Scalar interface provides:
+- 📚 Interactive API documentation
+- 🧪 Built-in request testing
+- 📖 Schema exploration
+- 🎨 Modern, professional UI
+
+### Available Endpoints
+
+- `/` or `/docs` - Scalar API Reference interface (recommended)
+- `/test` - Simple HTML testing interface
+- `/openapi.json` - OpenAPI 3.1 specification
+- `/mcp` - MCP JSON-RPC endpoint
+- `/tools/{toolName}` - Direct tool endpoints (proxied to MCP)
+
 ## Connect to Cloudflare AI Playground
 
 You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:

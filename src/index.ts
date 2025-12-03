@@ -319,9 +319,15 @@ async function generateOpenAPISpec(
 		}),
 	});
 
-	const mcpResponse = await MyMCP.serve("/mcp").fetch(mcpRequest, env, {} as ExecutionContext);
+	const mcpResponse = await MyMCP.serve("/mcp").fetch(
+		mcpRequest,
+		env,
+		{} as ExecutionContext,
+	);
 	const mcpData = (await mcpResponse.json()) as {
-		result?: { tools?: Array<{ name: string; description?: string; inputSchema?: any }> };
+		result?: {
+			tools?: Array<{ name: string; description?: string; inputSchema?: any }>;
+		};
 		error?: { message: string };
 	};
 	const tools = mcpData.result?.tools || [];
@@ -396,55 +402,79 @@ async function generateOpenAPISpec(
 	};
 
 	// Add individual tool endpoints
-		for (const tool of tools) {
-			const toolName = tool.name;
-			const path = `/tools/${toolName}`;
-			const inputSchema = tool.inputSchema || {};
-			const properties = inputSchema.properties || {};
-			const required = inputSchema.required || [];
+	for (const tool of tools) {
+		const toolName = tool.name;
+		const path = `/tools/${toolName}`;
+		const inputSchema = tool.inputSchema || {};
+		const properties = inputSchema.properties || {};
+		const required = inputSchema.required || [];
 
-			const requestBodySchema: Record<string, any> = {
-				type: "object",
-				properties: {},
+		const requestBodySchema: Record<string, any> = {
+			type: "object",
+			properties: {},
+		};
+
+		// Build example object
+		const example: Record<string, any> = {};
+
+		for (const [paramName, paramSchema] of Object.entries(properties)) {
+			// Handle Zod schema objects
+			let schemaType = "string";
+			let description = (paramSchema as any).description || "";
+			let exampleValue: any = "example-value";
+
+			// Try to infer type from Zod schema
+			if ((paramSchema as any).type) {
+				schemaType = (paramSchema as any).type;
+				if (schemaType === "boolean") exampleValue = true;
+				else if (schemaType === "number") exampleValue = 0;
+			} else if ((paramSchema as any)._def) {
+				// It's a Zod schema, try to convert it
+				try {
+					const zodSchema = paramSchema as z.ZodTypeAny;
+					const openApiSchema = zodToOpenAPISchema(zodSchema);
+
+					// Set example based on type
+					if (openApiSchema.type === "boolean") exampleValue = true;
+					else if (openApiSchema.type === "number") exampleValue = 0;
+					else if (openApiSchema.type === "array") exampleValue = [];
+
+					requestBodySchema.properties[paramName] = {
+						...openApiSchema,
+						description,
+						example: exampleValue,
+					};
+
+					// Add to example if required
+					if (required.includes(paramName)) {
+						example[paramName] = exampleValue;
+					}
+					continue;
+				} catch {
+					// Fallback to string
+				}
+			}
+
+			requestBodySchema.properties[paramName] = {
+				type: schemaType,
+				description,
+				example: exampleValue,
 			};
 
-			for (const [paramName, paramSchema] of Object.entries(properties)) {
-				// Handle Zod schema objects
-				let schemaType = "string";
-				let description = (paramSchema as any).description || "";
-
-				// Try to infer type from Zod schema
-				if ((paramSchema as any).type) {
-					schemaType = (paramSchema as any).type;
-				} else if ((paramSchema as any)._def) {
-					// It's a Zod schema, try to convert it
-					try {
-						const zodSchema = paramSchema as z.ZodTypeAny;
-						const openApiSchema = zodToOpenAPISchema(zodSchema);
-						requestBodySchema.properties[paramName] = {
-							...openApiSchema,
-							description,
-						};
-						continue;
-					} catch {
-						// Fallback to string
-					}
-				}
-
-				requestBodySchema.properties[paramName] = {
-					type: schemaType,
-					description,
-				};
+			if (required.includes(paramName)) {
+				example[paramName] = exampleValue;
 			}
+		}
 
-			if (required.length > 0) {
-				requestBodySchema.required = required;
-			}
+		if (required.length > 0) {
+			requestBodySchema.required = required;
+		}
 
 		openAPISpec.paths[path] = {
 			post: {
 				summary: tool.description || `Execute ${toolName} tool`,
-				description: tool.description || `Call the ${toolName} MCP tool`,
+				description:
+					tool.description || `Call the ${toolName} MCP tool via JSON-RPC`,
 				operationId: `call_${toolName}`,
 				tags: [toolName],
 				requestBody: {
@@ -452,6 +482,7 @@ async function generateOpenAPISpec(
 					content: {
 						"application/json": {
 							schema: requestBodySchema,
+							example,
 						},
 					},
 				},
@@ -463,14 +494,45 @@ async function generateOpenAPISpec(
 								schema: {
 									type: "object",
 									properties: {
-										content: {
-											type: "array",
-											items: {
-												type: "object",
-												properties: {
-													type: { type: "string" },
-													text: { type: "string" },
+										jsonrpc: { type: "string", example: "2.0" },
+										id: { type: "number", example: 1 },
+										result: {
+											type: "object",
+											properties: {
+												content: {
+													type: "array",
+													items: {
+														type: "object",
+														properties: {
+															type: { type: "string", example: "text" },
+															text: {
+																type: "string",
+																example: "Tool execution result",
+															},
+														},
+													},
 												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Bad request",
+						content: {
+							"application/json": {
+								schema: {
+									type: "object",
+									properties: {
+										jsonrpc: { type: "string" },
+										id: { type: "number" },
+										error: {
+											type: "object",
+											properties: {
+												code: { type: "number" },
+												message: { type: "string" },
 											},
 										},
 									},
@@ -512,7 +574,11 @@ const SCALAR_HTML = `<!DOCTYPE html>
 			"layout": "modern",
 			"spec": {
 				"url": "/openapi.json"
-			}
+			},
+			"proxy": "/mcp",
+			"hideDownloadButton": false,
+			"hideModels": false,
+			"hideSchema": false
 		}'
 	></script>
 	<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js"></script>
@@ -1001,7 +1067,7 @@ const TEST_HTML = `<!DOCTYPE html>
 </html>`;
 
 export default {
-	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 
 		// Serve Scalar API Reference (main interface)
@@ -1029,6 +1095,46 @@ export default {
 
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
 			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+		}
+
+		// Proxy tool endpoints to MCP JSON-RPC
+		if (url.pathname.startsWith("/tools/")) {
+			const toolName = url.pathname.replace("/tools/", "");
+			if (request.method === "POST") {
+				try {
+					const body = await request.json();
+					// Convert to MCP JSON-RPC format
+					const mcpRequest = new Request(new URL("/mcp", request.url), {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							jsonrpc: "2.0",
+							id: Date.now(),
+							method: "tools/call",
+							params: {
+								name: toolName,
+								arguments: body,
+							},
+						}),
+					});
+					return MyMCP.serve("/mcp").fetch(mcpRequest, env, ctx);
+				} catch (error) {
+					return new Response(
+						JSON.stringify({
+							jsonrpc: "2.0",
+							id: null,
+							error: {
+								code: -32700,
+								message: `Parse error: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						}),
+						{
+							status: 400,
+							headers: { "Content-Type": "application/json" },
+						},
+					);
+				}
+			}
 		}
 
 		if (url.pathname === "/mcp") {
