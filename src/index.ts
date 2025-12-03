@@ -8,7 +8,10 @@ interface StorybookStory {
 	name?: string;
 	id: string;
 	title: string;
+	type?: string;
 	description?: string;
+	componentPath?: string;
+	importPath?: string;
 	parameters?: {
 		docs?: {
 			description?: string;
@@ -21,6 +24,11 @@ interface StorybookStory {
 	argTypes?: Record<string, any>;
 }
 
+interface StorybookIndexData {
+	v?: number;
+	entries?: Record<string, StorybookStory>;
+}
+
 interface StorybookStoriesData {
 	stories?: Record<string, StorybookStory>;
 }
@@ -29,20 +37,28 @@ interface StorybookStoriesData {
 async function fetchStoriesFromStorybook(
 	baseUrl: string,
 ): Promise<StorybookStoriesData> {
-	const storiesResponse = await fetch(`${baseUrl}/api/stories.json`);
+	const indexResponse = await fetch(`${baseUrl}/index.json`);
 	
-	if (!storiesResponse.ok) {
-		// Fallback: try the stories API endpoint
-		const fallbackResponse = await fetch(`${baseUrl}/api/stories`);
-		if (!fallbackResponse.ok) {
-			throw new Error(
-				`Could not fetch stories from Storybook. Status: ${storiesResponse.status}`,
-			);
-		}
-		return (await fallbackResponse.json()) as StorybookStoriesData;
+	if (!indexResponse.ok) {
+		throw new Error(
+			`Could not fetch stories from Storybook. Status: ${indexResponse.status}`,
+		);
 	}
 	
-	return (await storiesResponse.json()) as StorybookStoriesData;
+	const indexData = (await indexResponse.json()) as StorybookIndexData;
+	
+	// Convert entries to stories format, filtering out docs entries
+	const stories: Record<string, StorybookStory> = {};
+	if (indexData.entries) {
+		for (const [key, entry] of Object.entries(indexData.entries)) {
+			// Only include story entries, not docs entries
+			if (entry.type === "story") {
+				stories[key] = entry;
+			}
+		}
+	}
+	
+	return { stories };
 }
 
 // Helper function to find a matching story by component name
@@ -73,6 +89,7 @@ interface ComponentInfo {
 	props?: Record<string, any>;
 	examples?: string;
 	storybookUrl: string;
+	componentPath?: string;
 	note?: string;
 }
 
@@ -81,33 +98,40 @@ async function getComponentDetails(
 	baseUrl: string,
 	matchingStory: StorybookStory,
 ): Promise<ComponentInfo> {
-	const storyDetailResponse = await fetch(
-		`${baseUrl}/api/stories/${matchingStory.id}`,
-	);
-	
-	if (storyDetailResponse.ok) {
-		const storyDetail = (await storyDetailResponse.json()) as StorybookStory;
+	// Try to fetch detailed story information
+	try {
+		const storyDetailResponse = await fetch(
+			`${baseUrl}/api/stories/${matchingStory.id}`,
+		);
 		
-		return {
-			name: storyDetail.name || matchingStory.name,
-			id: storyDetail.id || matchingStory.id,
-			title: storyDetail.title || matchingStory.title,
-			description:
-				storyDetail.description ||
-				storyDetail.parameters?.docs?.description ||
-				"",
-			props:
-				storyDetail.parameters?.argTypes || storyDetail.argTypes || {},
-			examples: storyDetail.parameters?.docs?.source?.code || "",
-			storybookUrl: `${baseUrl}/?path=/story/${storyDetail.id || matchingStory.id}`,
-		};
+		if (storyDetailResponse.ok) {
+			const storyDetail = (await storyDetailResponse.json()) as StorybookStory;
+			
+			return {
+				name: storyDetail.name || matchingStory.name,
+				id: storyDetail.id || matchingStory.id,
+				title: storyDetail.title || matchingStory.title,
+				description:
+					storyDetail.description ||
+					storyDetail.parameters?.docs?.description ||
+					"",
+				props:
+					storyDetail.parameters?.argTypes || storyDetail.argTypes || {},
+				examples: storyDetail.parameters?.docs?.source?.code || "",
+				storybookUrl: `${baseUrl}/?path=/story/${storyDetail.id || matchingStory.id}`,
+			};
+		}
+	} catch (_error) {
+		// If detail fetch fails, continue to return basic info
 	}
 	
-	// If detail fetch fails, return basic info
+	// If detail fetch fails, return basic info from index.json
 	return {
 		name: matchingStory.name,
 		id: matchingStory.id,
 		title: matchingStory.title,
+		description: matchingStory.description || "",
+		componentPath: matchingStory.componentPath,
 		storybookUrl: `${baseUrl}/?path=/story/${matchingStory.id}`,
 		note: "Detailed props information could not be fetched. Visit the Storybook URL for full details.",
 	};
