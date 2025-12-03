@@ -2,6 +2,33 @@
 
 This example allows you to deploy a remote MCP server that doesn't require authentication on Cloudflare Workers. 
 
+## Available Tools
+
+This MCP server provides two main tools:
+
+### 1. cursorRules
+Performs AI-powered search on the Algenium team's cursor rules using Cloudflare AutoRAG.
+
+**Parameters:**
+- `query` (string): The search query to find relevant cursor rules
+
+### 2. algtoolsUI
+Provides information about AlgtoolsUI components from the Storybook documentation.
+
+**Parameters:**
+- `componentName` (string, optional): The name of a specific component to get detailed information about (e.g., 'Button', 'Avatar', 'Dialog'). If not provided, returns a summary list of all available components.
+
+**Data Source:** This tool uses `https://algtools.github.io/ui/stories.json` as the single source of truth for component information.
+
+**Behavior:**
+- Without `componentName`: Returns a summary list of all available components with their story counts, props availability, and Storybook URLs
+- With `componentName`: Returns detailed information about the specific component including:
+  - Component title and path
+  - Description
+  - Props with their types and descriptions
+  - Available stories/examples
+  - Storybook URL
+
 ## Get started: 
 
 [![Deploy to Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/ai/tree/main/demos/remote-mcp-authless)

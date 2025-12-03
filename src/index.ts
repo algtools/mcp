@@ -3,138 +3,95 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import pjson from "../package.json";
 
-// Type definitions for Storybook API responses
-interface StorybookStory {
-	name?: string;
+// Type definitions for the stories.json structure
+interface PropType {
+	description?: string;
+	control?: string;
+	options?: string[];
+}
+
+interface StoryEntry {
 	id: string;
 	title: string;
+	name?: string;
+	importPath?: string;
+	componentPath?: string;
+	storiesImports?: string[];
 	type?: string;
-	description?: string;
+	tags?: string[];
+	componentInfo?: {
+		props?: Record<string, PropType>;
+		description?: string | null;
+	};
+}
+
+interface ComponentSummary {
+	title: string;
 	componentPath?: string;
 	importPath?: string;
-	parameters?: {
-		docs?: {
-			description?: string;
-			source?: {
-				code?: string;
-			};
-		};
-		argTypes?: Record<string, any>;
-	};
-	argTypes?: Record<string, any>;
-}
-
-interface StorybookIndexData {
-	v?: number;
-	entries?: Record<string, StorybookStory>;
-}
-
-interface StorybookStoriesData {
-	stories?: Record<string, StorybookStory>;
-}
-
-// Helper function to fetch stories from Storybook
-async function fetchStoriesFromStorybook(
-	baseUrl: string,
-): Promise<StorybookStoriesData> {
-	const indexResponse = await fetch(`${baseUrl}/index.json`);
-	
-	if (!indexResponse.ok) {
-		throw new Error(
-			`Could not fetch stories from Storybook. Status: ${indexResponse.status}`,
-		);
-	}
-	
-	const indexData = (await indexResponse.json()) as StorybookIndexData;
-	
-	// Convert entries to stories format, filtering out docs entries
-	const stories: Record<string, StorybookStory> = {};
-	if (indexData.entries) {
-		for (const [key, entry] of Object.entries(indexData.entries)) {
-			// Only include story entries, not docs entries
-			if (entry.type === "story") {
-				stories[key] = entry;
-			}
-		}
-	}
-	
-	return { stories };
-}
-
-// Helper function to find a matching story by component name
-function findMatchingStory(
-	storiesData: StorybookStoriesData,
-	componentName: string,
-): StorybookStory | null {
-	const stories = Object.values(storiesData.stories || {});
-	const componentLower = componentName.toLowerCase();
-	
-	return (
-		stories.find((story) => {
-			const storyName = story.name?.toLowerCase() || "";
-			const storyId = story.id?.toLowerCase() || "";
-			return (
-				storyName.includes(componentLower) ||
-				storyId.includes(componentLower)
-			);
-		}) || null
-	);
-}
-
-interface ComponentInfo {
-	name?: string;
-	id: string;
-	title: string;
-	description?: string;
-	props?: Record<string, any>;
-	examples?: string;
+	description?: string | null;
+	props?: Record<string, PropType>;
+	storyCount: number;
+	stories: Array<{ id: string; name: string }>;
 	storybookUrl: string;
-	componentPath?: string;
-	note?: string;
 }
 
-// Helper function to get component details
-async function getComponentDetails(
-	baseUrl: string,
-	matchingStory: StorybookStory,
-): Promise<ComponentInfo> {
-	// Try to fetch detailed story information
-	try {
-		const storyDetailResponse = await fetch(
-			`${baseUrl}/api/stories/${matchingStory.id}`,
-		);
-		
-		if (storyDetailResponse.ok) {
-			const storyDetail = (await storyDetailResponse.json()) as StorybookStory;
-			
-			return {
-				name: storyDetail.name || matchingStory.name,
-				id: storyDetail.id || matchingStory.id,
-				title: storyDetail.title || matchingStory.title,
-				description:
-					storyDetail.description ||
-					storyDetail.parameters?.docs?.description ||
-					"",
-				props:
-					storyDetail.parameters?.argTypes || storyDetail.argTypes || {},
-				examples: storyDetail.parameters?.docs?.source?.code || "",
-				storybookUrl: `${baseUrl}/?path=/story/${storyDetail.id || matchingStory.id}`,
-			};
-		}
-	} catch (_error) {
-		// If detail fetch fails, continue to return basic info
+interface StoriesJsonData {
+	entries?: Record<string, StoryEntry>;
+	components?: Record<string, ComponentSummary>;
+}
+
+// Helper function to fetch stories from stories.json
+async function fetchStoriesJson(): Promise<StoriesJsonData> {
+	const response = await fetch("https://algtools.github.io/ui/stories.json");
+
+	if (!response.ok) {
+		throw new Error(`Could not fetch stories.json. Status: ${response.status}`);
 	}
-	
-	// If detail fetch fails, return basic info from index.json
-	return {
-		name: matchingStory.name,
-		id: matchingStory.id,
-		title: matchingStory.title,
-		description: matchingStory.description || "",
-		componentPath: matchingStory.componentPath,
-		storybookUrl: `${baseUrl}/?path=/story/${matchingStory.id}`,
-		note: "Detailed props information could not be fetched. Visit the Storybook URL for full details.",
-	};
+
+	const data = (await response.json()) as StoriesJsonData;
+	return data;
+}
+
+// Helper function to find a matching component by name
+function findMatchingComponent(
+	storiesData: StoriesJsonData,
+	componentName: string,
+): ComponentSummary | null {
+	if (!storiesData.components) {
+		return null;
+	}
+
+	const componentNameLower = componentName.toLowerCase();
+
+	// Try exact match on component title
+	for (const [key, component] of Object.entries(storiesData.components)) {
+		const titleLower = component.title.toLowerCase();
+		const titleWithoutCategory = titleLower.split("/").pop() || "";
+
+		if (
+			titleLower === componentNameLower ||
+			titleWithoutCategory === componentNameLower ||
+			key.toLowerCase() === componentNameLower
+		) {
+			return component;
+		}
+	}
+
+	// Try partial match
+	for (const component of Object.values(storiesData.components)) {
+		const titleLower = component.title.toLowerCase();
+		const titleWithoutCategory = titleLower.split("/").pop() || "";
+
+		if (
+			titleLower.includes(componentNameLower) ||
+			titleWithoutCategory.includes(componentNameLower)
+		) {
+			return component;
+		}
+	}
+
+	return null;
 }
 
 // Define our MCP agent with tools
@@ -212,7 +169,7 @@ export class MyMCP extends McpAgent<Env> {
 			},
 		);
 
-		// AlgtoolsUI tool that fetches component information from Storybook
+		// AlgtoolsUI tool that fetches component information from stories.json
 		this.server.tool(
 			"algtoolsUI",
 			{
@@ -220,36 +177,31 @@ export class MyMCP extends McpAgent<Env> {
 					.string()
 					.optional()
 					.describe(
-						"Optional: The name of a specific component to get detailed information about. If not provided, returns a list of all available components.",
+						"Optional: The name of a specific component to get detailed information about (e.g., 'Button', 'Avatar', 'Dialog'). If not provided, returns a summary list of all available components.",
 					),
 			},
 			async ({ componentName }) => {
 				try {
-					const storybookBaseUrl = "https://algtools.github.io/ui";
-					const storiesData = await fetchStoriesFromStorybook(
-						storybookBaseUrl,
-					);
-					
+					const storiesData = await fetchStoriesJson();
+
 					// If a specific component is requested, get its details
 					if (componentName) {
-						const matchingStory = findMatchingStory(
+						const matchingComponent = findMatchingComponent(
 							storiesData,
 							componentName,
 						);
-						
-						if (!matchingStory) {
-							const allStories = Object.values(
-								storiesData.stories || {},
-							);
-							const componentNames = allStories
-								.map((s) => s.name || s.id)
+
+						if (!matchingComponent) {
+							const componentNames = Object.values(storiesData.components || {})
+								.map((c) => c.title)
 								.slice(0, 20)
 								.join(", ");
+							const totalCount = Object.keys(
+								storiesData.components || {},
+							).length;
 							const moreCount =
-								allStories.length > 20
-									? `... (${allStories.length} total)`
-									: "";
-							
+								totalCount > 20 ? `... (${totalCount} total)` : "";
+
 							return {
 								content: [
 									{
@@ -259,40 +211,37 @@ export class MyMCP extends McpAgent<Env> {
 								],
 							};
 						}
-						
-						const componentInfo = await getComponentDetails(
-							storybookBaseUrl,
-							matchingStory,
-						);
-						
+
 						return {
 							content: [
 								{
 									type: "text",
-									text: JSON.stringify(componentInfo, null, 2),
+									text: JSON.stringify(matchingComponent, null, 2),
 								},
 							],
 						};
 					}
-					
-					// If no component name provided, list all available components
-					const stories = Object.values(storiesData.stories || {});
-					const componentsList = stories.map((story) => ({
-						name: story.name || story.id,
-						id: story.id,
-						title: story.title,
-						storybookUrl: `${storybookBaseUrl}/?path=/story/${story.id}`,
+
+					// If no component name provided, return a summary of all components
+					const componentsSummary = Object.entries(
+						storiesData.components || {},
+					).map(([_key, component]) => ({
+						title: component.title,
+						storyCount: component.storyCount,
+						hasProps: Object.keys(component.props || {}).length > 0,
+						componentPath: component.componentPath,
+						storybookUrl: component.storybookUrl,
 					}));
-					
+
 					return {
 						content: [
 							{
 								type: "text",
 								text: JSON.stringify(
 									{
-										totalComponents: componentsList.length,
-										components: componentsList,
-										note: "Use the 'componentName' parameter to get detailed information about a specific component, including its props and usage examples.",
+										totalComponents: componentsSummary.length,
+										components: componentsSummary,
+										note: "Use the 'componentName' parameter to get detailed information about a specific component, including its props, available stories, and usage examples.",
 									},
 									null,
 									2,
@@ -305,7 +254,7 @@ export class MyMCP extends McpAgent<Env> {
 						content: [
 							{
 								type: "text",
-								text: `Error: Failed to fetch component information from Storybook. ${error instanceof Error ? error.message : String(error)}. Please check if the Storybook is accessible at https://algtools.github.io/ui`,
+								text: `Error: Failed to fetch component information from stories.json. ${error instanceof Error ? error.message : String(error)}. Please check if the stories.json is accessible at https://algtools.github.io/ui/stories.json`,
 							},
 						],
 					};
