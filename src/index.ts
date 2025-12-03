@@ -1,12 +1,13 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import pjson from "../package.json";
 
 // Define our MCP agent with tools
 export class MyMCP extends McpAgent<Env> {
 	server = new McpServer({
 		name: "algtools-mcp",
-		version: "0.0.0",
+		version: pjson.version,
 	});
 
 	async init() {
