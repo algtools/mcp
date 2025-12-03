@@ -581,7 +581,7 @@ const SCALAR_HTML = `<!DOCTYPE html>
 			"hideSchema": false
 		}'
 	></script>
-	<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.40.0/dist/browser/standalone.js"></script>
 </body>
 </html>`;
 
