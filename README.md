@@ -37,7 +37,7 @@ This will deploy your MCP server to a URL like: `remote-mcp-server-authless.<you
 
 Alternatively, you can use the command line below to get the remote MCP Server created on your local machine:
 ```bash
-npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/remote-mcp-authless
+pnpm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/remote-mcp-authless
 ```
 
 ## Customizing your MCP Server
@@ -79,6 +79,29 @@ interface Env {
     AI_SEARCH_API_TOKEN: string;
 }
 ```
+
+## Testing MCP Tools Online
+
+This MCP server includes a comprehensive web interface for testing tools using **Scalar API Reference**.
+
+### Access the Testing Interface
+
+After deploying or running locally, visit:
+- **Main Interface (Scalar)**: `http://localhost:8787/` or `http://localhost:8787/docs`
+- **OpenAPI Spec**: `http://localhost:8787/openapi.json`
+
+The Scalar interface provides:
+- 📚 Interactive API documentation
+- 🧪 Built-in request testing
+- 📖 Schema exploration
+- 🎨 Modern, professional UI
+
+### Available Endpoints
+
+- `/` or `/docs` - Scalar API Reference interface
+- `/openapi.json` - OpenAPI 3.1 specification
+- `/mcp` - MCP JSON-RPC endpoint
+- `/tools/{toolName}` - Direct tool endpoints (proxied to MCP)
 
 ## Connect to Cloudflare AI Playground
 
